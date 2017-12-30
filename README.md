@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-<b> Multichannel Double Recursive Frequentist-Bayesian Particle Identification (pion, kaon, proton, electron etc.) for High Energy Physics </b>
+<b> Multichannel Double Recursive Frequentist-Bayesian Particle Identification (pion, kaon, proton, electron etc.) in High Energy Physics </b>
 
 A fully working proof of concept C++/ROOT code, to be written into a C++ class.
 <br/>
