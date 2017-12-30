@@ -1,6 +1,6 @@
 // Multichannel Double Recursive Frequentist-Bayesian Particle Identification (pion, kaon, proton, electron etc.)
 //
-// COMPILE with: aliroot analyscep.cc+ -b -q
+// COMPILE with: root analyscep.cc+ -b -q
 //
 // TODO: write down a C++ class of this.
 //
