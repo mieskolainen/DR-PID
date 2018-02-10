@@ -49,10 +49,10 @@ void set_plot_style() {
     gStyle->SetNumberContours(NCont);
 
     // Black-Red palette
-    gStyle->SetPalette(53); // 56 for inverted
+    //gStyle->SetPalette(53); // 53/56 for (non)-inverted
 
     gStyle->SetTitleOffset(1.6,"x");  //X-axis title offset from axis
-    gStyle->SetTitleOffset(1.6,"y");  //Y-axis title offset from axis
+    gStyle->SetTitleOffset(2.5,"y");  //Y-axis title offset from axis
     gStyle->SetTitleSize(0.03,"x");   //X-axis title size
     gStyle->SetTitleSize(0.03,"y");   //Y-axis
     gStyle->SetTitleSize(0.03,"z");
@@ -94,8 +94,13 @@ std::vector<TString> alabels;
 std::vector<TString> blabels;
 std::vector<TString> plabels;
 
+// Initial state setup
+const double sqrts = 13000; // Needed for some observables
+
 
 // Final state setup
+// Masses in GeV
+const double ME  = 0.510998928e-3;
 const double MPI = 0.13957018;
 const double MK  = 0.493677;
 const double MP  = 0.9382720813;
@@ -114,10 +119,10 @@ const int TPC_ind = 0;
 const int TOF_ind = 1;
 
 // Phase I PID binning setup
-const double    PMIN   = 0.0;
-const double    PMAX   = 3.5;
-const int       PBINS  = 25;
-const int       ITER   = 10;
+const double    PMIN    = 0.0;
+const double    PMAX    = 3.5;
+const int       PBINS   = 25;
+const int       ITER    = 10;
 
 // Phase II system binning setup
 const double    SPMIN   = 0.0;
@@ -162,16 +167,25 @@ Float_t pyMc2 = 0;
 Float_t pzMc2 = 0;
 Int_t   pidCode1 = 0;
 Int_t   pidCode2 = 0;
+Char_t  ada = 0;
+Char_t  adc = 0;
 
 
 // Histograms
 std::vector<TH1F*> h1M(NCHANNEL, 0);
+std::vector<TH1F*> h1MJPsi(NCHANNEL, 0);
+
 std::vector<TH1F*> h1Pt(NCHANNEL, 0);
 std::vector<TH1F*> h1pt(NCHANNEL, 0);
 std::vector<TH1F*> h1Y(NCHANNEL, 0);
 std::vector<TH1F*> h1y(NCHANNEL, 0);
 std::vector<TH1F*> h1eta(NCHANNEL, 0);
 std::vector<TH1F*> h1dy(NCHANNEL, 0);
+
+std::vector<TH1F*> h1xi1(NCHANNEL, 0);
+std::vector<TH1F*> h1xi2(NCHANNEL, 0);
+std::vector<TH2F*> h2xi1xi2(NCHANNEL, 0);
+std::vector<TH2F*> h2y1y2(NCHANNEL, 0);
 
 std::vector<TProfile*> hprMPt(NCHANNEL, 0);
 std::vector<TProfile*> hprMpt(NCHANNEL, 0);
@@ -220,7 +234,7 @@ const double TOFCUT = 1e6;
 
 // Constants
 const double z95 = 1.96; // 95% Gaussian CL
-const double PI = 3.14159265359; // pi
+const double PI  = 3.14159265359; // pi
 
 // ASCII output
 FILE* asciif;
@@ -233,10 +247,11 @@ std::vector<std::vector<double>> EM(double PMIN, double PMAX, int PBINS, int ITE
 int    GetIdx(double value, double MINVAL, double MAXVAL, int NUMBINS);
 void   GetProb(std::vector<double>& posterior, const std::vector<std::vector<double>>& nsigma, const std::vector<double>& prior);
 double fG(double n);
-void   InitTree();
+void   InitTree(std::string tree_filename);
 void   CloseTree();
 void   GetSignal();
 bool   CheckPIDsignal();
+bool   CheckForwardVeto();
 void   InitHistogram();
 void   FillHisto(std::vector<double> prob_);
 void   MakePlots();
@@ -246,16 +261,35 @@ void   HEframe(std::vector<TLorentzVector>& p);
 bool DEBUG = false;
 
 
+// ROOT data input
+std::string ROOT_datafile;
+
+std::string output_ascii;
+
+// Forward veto mode
+int  VMODE = 0;
 
 // MAIN FUNCTION
 int analyscep() {
 
-  // Open ASCII output
-  asciif = fopen("pipiPIDLHC16.csv", "w");
-  if (asciif == NULL) {
-    printf("Error opening ascii output file!\n");
-    exit(1);
-  }
+  // VETO mode setup (set manually, see CheckForwardVeto::), 0 for no veto considerations
+//  VMODE = 0;
+  VMODE = 1;
+//  VMODE = 2;
+//  VMODE = 3;
+//  VMODE = 4;
+
+  output_ascii = "tree2track_CUP25";
+//output_ascii = "tree2track_CUP13";
+//output_ascii = "tree2track_kPipmOrexp";
+//output_ascii = "tree2track_kKpkmOrexp";
+
+  // --------------------------------------------------------------------------
+  // 0. SETUP ROOT input
+
+  ROOT_datafile = output_ascii + ".root";
+
+
   // --------------------------------------------------------------------------
   // 0. Init vectors
 
@@ -276,7 +310,34 @@ int analyscep() {
     p_r.push_back(temp4vec);
   }
 
-  printf("Running... \n");
+
+  // --------------------------------------------------------------------------
+  // Setup output file
+
+  if (VMODE == 0) {
+    output_ascii = output_ascii;
+  }
+  if (VMODE == 1) {
+    output_ascii = output_ascii + "_ADC=0_AND_ADA=0";
+  }
+  if (VMODE == 2) {
+    output_ascii = output_ascii + "_ADC=0_AND_ADA=1";
+  }
+  if (VMODE == 3) {
+    output_ascii = output_ascii + "_ADC=1_AND_ADA=0";
+  }
+  if (VMODE == 4) {
+    output_ascii = output_ascii + "_ADC=1_AND_ADA=1";
+  }
+
+  // Open ASCII output
+  asciif = fopen((output_ascii + ".ascii").c_str(), "w");
+  if (asciif == NULL) {
+    printf("Error opening ascii output file: %s !\n", output_ascii.c_str());
+    exit(1);
+  }
+
+  printf("Reading input from: %s \n", ROOT_datafile.c_str());
 
   // --------------------------------------------------------------------------
   // 1. Run Phase I analysis
@@ -292,7 +353,7 @@ int analyscep() {
   for (int i = 0; i < SITER; ++i) {
     Analyzer(channel_prior, mode);
   }
-  
+
   // Save final histograms
   mode = 2;
   Analyzer(channel_prior, mode);
@@ -302,6 +363,8 @@ int analyscep() {
   setROOTstyle();
   MakePlots();
 
+  // Close ascii output
+  fclose(asciif);
 
   return EXIT_SUCCESS;
 }
@@ -325,10 +388,10 @@ double legendre_pl(int l, double x) {
     return (35.0*x*x*x*x - 30.0*x*x + 3.0) / 8.0;
 
   } else if (l == 5) {
-    
+
     return (63.0 * x*x*x*x*x - 70*x*x*x + 15 * x)/ 8.0;
   } else if (l == 6) {
-    
+
     return (231.0 * x*x*x*x*x*x - 315.0*x*x*x*x + 105.0*x*x - 5.0)/ 16.0;
   } else if (l == 7) {
 
@@ -340,11 +403,9 @@ double legendre_pl(int l, double x) {
 }
 
 // Initialize input ROOT tree
-void InitTree() {
+void InitTree(std::string tree_filename) {
 
-f = new TFile("tree2track_CUP13.root");
-//  f = new TFile("tree2track_kPipmOrexp.root");
-//  f = new TFile("tree2track_kKpkmOrexp.root");
+  f = new TFile(tree_filename.c_str());
 
   tree2track = (TTree*) f->Get("tree2track");
 
@@ -355,15 +416,19 @@ f = new TFile("tree2track_CUP13.root");
   tree2track->SetBranchAddress("pxMc2",&pxMc2);
   tree2track->SetBranchAddress("pyMc2",&pyMc2);
   tree2track->SetBranchAddress("pzMc2",&pzMc2);
+
   tree2track->SetBranchAddress("pidCode1",&pidCode1);
   tree2track->SetBranchAddress("pidCode2",&pidCode2);
+
   tree2track->SetBranchAddress("zVtx",&zVtx);
+
   tree2track->SetBranchAddress("px1",&px1);
   tree2track->SetBranchAddress("py1",&py1);
   tree2track->SetBranchAddress("pz1",&pz1);
   tree2track->SetBranchAddress("px2",&px2);
   tree2track->SetBranchAddress("py2",&py2);
   tree2track->SetBranchAddress("pz2",&pz2);
+
   tree2track->SetBranchAddress("sigmaPiTPC1",&sigmaPiTPC1);
   tree2track->SetBranchAddress("sigmaKaTPC1",&sigmaKaTPC1);
   tree2track->SetBranchAddress("sigmaPrTPC1",&sigmaPrTPC1);
@@ -376,6 +441,9 @@ f = new TFile("tree2track_CUP13.root");
   tree2track->SetBranchAddress("sigmaPiTOF2",&sigmaPiTOF2);
   tree2track->SetBranchAddress("sigmaKaTOF2",&sigmaKaTOF2);
   tree2track->SetBranchAddress("sigmaPrTOF2",&sigmaPrTOF2);
+
+  tree2track->SetBranchAddress("ada",&ada);
+  tree2track->SetBranchAddress("adc",&adc);
 
 }
 
@@ -430,6 +498,32 @@ bool CheckPIDsignal() {
   }*/
 }
 
+// Forward VETO check, return true if veto condition is satisfied, else false
+bool CheckForwardVeto() {
+
+  if (VMODE == 0) { // No selection on forward veto, return true always
+    return true;
+  }
+  if (VMODE == 1) {
+    if (adc == false && ada == false) // ADC=0_AND_ADA=0 ~ "elastic" like
+      return true;
+  }
+  if (VMODE == 2) {
+    if (adc == false && ada == true)  // ADC=0_AND_ADA=1 ~ "SDR" like
+      return true;
+  }
+  if (VMODE == 3) {
+    if (adc == true && ada == false)  // ADC=1_AND_ADA=0 ~ "SDL" like
+      return true;
+  }
+  if (VMODE == 4) {
+    if (adc == true && ada == true)   // ADC=1_AND_ADA=1 ~ "DD" like
+      return true;
+  }
+
+  return false; // default
+}
+
 
 // Initialize histograms
 void InitHistogram() {
@@ -440,18 +534,18 @@ void InitHistogram() {
 
   // Mass limits
   double MIN_M = 0;
-  double MAX_M = 3.5;
+  double MAX_M = 5.0;
 
   // Rapidity limits
   double MIN_Y = -1.25;
   double MAX_Y = 1.25;
 
   BINS = 250; MIN_M = 0.0;
-  
+
 
   pname_a.push_back("#pi^{+}"); pname_a.push_back("K^{+}"); pname_a.push_back("p");
   pname_b.push_back("#pi^{-}"); pname_b.push_back("K^{-}"); pname_b.push_back("#bar{p}");
-  plabels.push_back("Pi"); plabels.push_back("Ka"); plabels.push_back("Pr");
+  plabels.push_back("Pi");      plabels.push_back("Ka");    plabels.push_back("Pr");
 
   for (int i = 0; i < NSPECIES; ++i) {
     for (int j = 0; j < NSPECIES; ++j) {
@@ -465,39 +559,47 @@ void InitHistogram() {
 
   for (int k = 0; k < NCHANNEL; ++k) {
 
-    h1M[k]   = new TH1F("M(%d)",  Form(";M(%s) (GeV); Events / (%0.3f GeV)", slabels.at(k).Data(), (MAX_M - MIN_M)/(double)BINS), BINS, MIN_M, MAX_M);
-    h1Pt[k]  = new TH1F("Pt(%d)", Form(";System p_{t}(%s) (GeV); Events / (%0.3f GeV)", slabels.at(k).Data(), (MAX_M - MIN_M)/(double)BINS), BINS, MIN_M, MAX_M);
-    h1pt[k]  = new TH1F("pt(%d)", Form(";Particle p_{t}(%s) (GeV); Events / (%0.3f GeV)", alabels.at(k).Data(), (MAX_M - MIN_M)/(double)BINS), BINS, MIN_M, MAX_M);
+    h1M[k]      = new TH1F(Form("M(%d)", k),   Form(";M(%s) (GeV); Events / (%0.3f GeV)", slabels.at(k).Data(), (MAX_M - MIN_M)/(double)BINS), BINS, MIN_M, MAX_M);
 
-    h1Y[k]   = new TH1F("Y(%d)", Form(";Rapidity Y(%s); Events / %0.3f", slabels.at(k).Data(), (MAX_Y - MIN_Y)/(double)BINS), BINS, MIN_Y, MAX_Y);
-    h1y[k]   = new TH1F("y(%d)", Form(";Rapidity y(%s); Events / %0.3f", alabels.at(k).Data(), (MAX_Y - MIN_Y)/(double)BINS), BINS, MIN_Y, MAX_Y);
-    h1eta[k] = new TH1F("eta(%d)", Form(";Pseudorapidity #eta(%s); Events / %0.3f", alabels.at(k).Data(), (MAX_Y - MIN_Y)/(double)BINS), BINS, MIN_Y, MAX_Y);
-    h1dy[k]  = new TH1F("y(%d)", Form(";Pair #Deltay(%s); Events / %0.3f", slabels.at(k).Data(), 2*(MAX_Y - MIN_Y)/(double)BINS), BINS, 2*MIN_Y, 2*MAX_Y);
-    
-    hprMPt[k]  = new TProfile("prof MPt(%d)", Form(";M(%s) (GeV); System <p_{t}> (GeV)", slabels.at(k).Data()), BINS, MIN_M, MAX_M);
-    hprMpt[k]  = new TProfile("prof Mpt(%d)", Form(";M(%s) (GeV); Particle <p_{t}(%s)> (GeV)", slabels.at(k).Data(), alabels.at(k).Data()), BINS, MIN_M, MAX_M);
+    h1MJPsi[k]  = new TH1F(Form("M_Jpsi(%d)", k), Form(";M(%s) (GeV); Events / (%0.3f GeV)", slabels.at(k).Data(), (3.3 - 2.9)/(double)50), 50, 2.9, 3.3);
 
-    h2EtaPhi[k]   = new TH2F("eta,phi", Form(";Particle #eta(%s); Particle #phi(%s) (rad)", alabels.at(k).Data(), alabels.at(k).Data()), BINS, MIN_Y, MAX_Y, BINS, -PI, PI);
-    h2MCosTheta[k] = new TH2F("M,costheta", Form(";M(%s) (GeV); cos #theta(%s)_{ r.f.} (rad)", slabels.at(k).Data(), alabels.at(k).Data()), BINS, MIN_M, MAX_M, BINS, -1, 1);
+
+    h1Pt[k]     = new TH1F(Form("Pt(%d)", k),  Form(";System p_{t}(%s) (GeV); Events / (%0.3f GeV)",   slabels.at(k).Data(), (MAX_M - MIN_M)/(double)BINS), BINS, MIN_M, MAX_M);
+    h1pt[k]     = new TH1F(Form("pt(%d)", k),  Form(";Particle p_{t}(%s) (GeV); Events / (%0.3f GeV)", alabels.at(k).Data(), (MAX_M - MIN_M)/(double)BINS), BINS, MIN_M, MAX_M);
+
+    h1xi1[k]    = new TH1F(Form("h1xi1(%d)", k),    Form(";#xi_{1}(%s);  Events / (%0.3E bin)", slabels.at(k).Data(), (3e-4 - 5e-5)/(double)BINS), BINS, 1e-5, 3e-4);
+    h1xi2[k]    = new TH1F(Form("h1xi2(%d)", k),    Form(";#xi_{2}(%s);  Events / (%0.3E bin)", slabels.at(k).Data(), (3e-4 - 5e-5)/(double)BINS), BINS, 1e-5, 3e-4);
+    h2xi1xi2[k] = new TH2F(Form("h1xi1xi2(%d)", k), Form("%s;#xi_{1}; #xi_{2}", slabels.at(k).Data()), BINS/2, 1e-5, 3e-4, BINS/2, 1e-5, 3e-4);
+    h2y1y2[k]   = new TH2F(Form("h1y1y2(%d)", k),   Form("%s;y_{1}; y_{2}", slabels.at(k).Data()), BINS/2, -1, 1, BINS/2, -1, 1);
+
+    h1Y[k]      = new TH1F(Form("Y(%d)", k),   Form(";Rapidity Y(%s); Events / %0.3f", slabels.at(k).Data(), (MAX_Y - MIN_Y)/(double)BINS), BINS, MIN_Y, MAX_Y);
+    h1y[k]      = new TH1F(Form("y(%d)", k),   Form(";Rapidity y(%s); Events / %0.3f", alabels.at(k).Data(), (MAX_Y - MIN_Y)/(double)BINS), BINS, MIN_Y, MAX_Y);
+    h1eta[k]    = new TH1F(Form("eta(%d)", k), Form(";Pseudorapidity #eta(%s); Events / %0.3f", alabels.at(k).Data(), (MAX_Y - MIN_Y)/(double)BINS), BINS, MIN_Y, MAX_Y);
+    h1dy[k]     = new TH1F(Form("Deltay(%d)", k),   Form(";Pair #Deltay(%s); Events / %0.3f", slabels.at(k).Data(), 2*(MAX_Y - MIN_Y)/(double)BINS), BINS, 2*MIN_Y, 2*MAX_Y);
+
+    hprMPt[k]   = new TProfile(Form("prof MPt(%d)", k),   Form(";M(%s) (GeV); System <p_{t}> (GeV)",       slabels.at(k).Data()), BINS, MIN_M, MAX_M);
+    hprMpt[k]   = new TProfile(Form("prof Mpt(%d)", k),   Form(";M(%s) (GeV); Particle <p_{t}(%s)> (GeV)", slabels.at(k).Data(), alabels.at(k).Data()), BINS, MIN_M, MAX_M);
+
+    h2EtaPhi[k]    = new TH2F(Form("eta,phi(%d)", k),    Form(";Particle #eta(%s); Particle #phi(%s) (rad)", alabels.at(k).Data(), alabels.at(k).Data()), BINS/2, MIN_Y, MAX_Y, BINS/2, -PI, PI);
+    h2MCosTheta[k] = new TH2F(Form("M,costheta(%d)", k), Form(";M(%s) (GeV); cos #theta(%s)_{ r.f.} (rad)",  slabels.at(k).Data(), alabels.at(k).Data()), BINS/2, MIN_M, MAX_M, BINS/2, -1, 1);
 
     //h1M_pipi->Sumw2();
-    
-    h2MPt[k]    = new TH2F("M,Pt()", Form(";M(%s) (GeV); System p_{T} (GeV)", slabels.at(k).Data()), BINS, MIN_M, MAX_M, BINS, 0, 2.5);
-    h2Mdphi[k]  = new TH2F("M,dphi()", Form(";M(%s) (GeV); #Delta#phi (rad)", slabels.at(k).Data()), BINS, MIN_M, MAX_M, BINS, 0, 3.14159);
-    h2Mpt[k]    = new TH2F("M,pt()", Form(";M(%s) (GeV); %s p_{T} (GeV)", slabels.at(k).Data(), alabels.at(k).Data()), BINS, MIN_M, MAX_M, BINS, 0, 2.5);
-    h2Ptdphi[k] = new TH2F("Pt,dphi()", Form(";System p_{T}(%s) (GeV); #Delta#phi (rad)", slabels.at(k).Data()), BINS, 0.0, 2.5, BINS, 0, 3.14159);
-    h2ptdphi[k] = new TH2F("pt,dphi()", Form(";Particle p_{T}(%s) (GeV); #Delta#phi (rad)", alabels.at(k).Data()), BINS, 0.0, 2.5, BINS, 0, 3.14159);
 
+    h2MPt[k]    = new TH2F(Form("M(%d),Pt()", k),    Form(";M(%s) (GeV); System p_{T} (GeV)", slabels.at(k).Data()), BINS/2, MIN_M, MAX_M, BINS/2, 0, 2.5);
+    h2Mdphi[k]  = new TH2F(Form("M(%d),dphi()", k),  Form(";M(%s) (GeV); #Delta#phi (rad)", slabels.at(k).Data()), BINS/2, MIN_M, MAX_M, BINS/2, 0, 3.14159);
+    h2Mpt[k]    = new TH2F(Form("M(%d),pt()", k),    Form(";M(%s) (GeV); %s p_{T} (GeV)", slabels.at(k).Data(), alabels.at(k).Data()), BINS/2, MIN_M, MAX_M, BINS/2, 0, 2.5);
+    h2Ptdphi[k] = new TH2F(Form("Pt(%d),dphi()", k), Form(";System p_{T}(%s) (GeV); #Delta#phi (rad)", slabels.at(k).Data()), BINS/2, 0.0, 2.5, BINS/2, 0, 3.14159);
+    h2ptdphi[k] = new TH2F(Form("pt(%d),dphi()", k), Form(";Particle p_{T}(%s) (GeV); #Delta#phi (rad)", alabels.at(k).Data()), BINS/2, 0.0, 2.5, BINS/2, 0, 3.14159);
 
     // Feynman xF
-    h1XF[k]    = new TH1F("x_F ", Form(";Feynman x_{F}(%s);Events", alabels.at(k).Data()), BINS, 0, 1);
-    h2MXF[k]   = new TH2F("M x_F ", Form(";M(%s) (GeV); Feynman x_{F}(%s)", slabels.at(k).Data(), alabels.at(k).Data()), BINS, 0, 4, BINS, 0, 1);
-    hprMXF[k]  = new TProfile("prof MXF(%d)", Form(";M(%s) (GeV); Feynman <x_{F}(%s)>", slabels.at(k).Data(), alabels.at(k).Data()), BINS, MIN_M, MAX_M);
+    h1XF[k]     = new TH1F(Form("x_F(%d)", k),        Form(";Feynman x_{F}(%s);Events", alabels.at(k).Data()), BINS, 0, 1);
+    h2MXF[k]    = new TH2F(Form("M x_F(%d)", k),      Form(";M(%s) (GeV); Feynman x_{F}(%s)", slabels.at(k).Data(), alabels.at(k).Data()), BINS/2, 0, 4, BINS/2, 0, 1);
+    hprMXF[k]   = new TProfile(Form("prof MXF(%d)", k),    Form(";M(%s) (GeV); Feynman <x_{F}(%s)>", slabels.at(k).Data(), alabels.at(k).Data()), BINS, MIN_M, MAX_M);
 
     // xT
-    h1XT[k]    = new TH1F("x_T ", Form(";x_{T}(%s);Events", slabels.at(k).Data()), BINS, 0, 1);
-    h2MXT[k]   = new TH2F("M x_T ", Form(";M(%s) (GeV); x_{T}(%s)", slabels.at(k).Data(), alabels.at(k).Data()), BINS, 0, 4, BINS, 0, 1);
-    hprMXT[k]  = new TProfile("prof MXT(%d)", Form(";M(%s) (GeV); <x_{T}(%s)>", slabels.at(k).Data(), alabels.at(k).Data()), BINS, MIN_M, MAX_M);
+    h1XT[k]     = new TH1F(Form("x_T(%d) ",    k),    Form(";x_{T}(%s);Events", slabels.at(k).Data()), BINS, 0, 1);
+    h2MXT[k]    = new TH2F(Form("M x_T(%d) ",  k),    Form(";M(%s) (GeV); x_{T}(%s)", slabels.at(k).Data(), alabels.at(k).Data()), BINS/2, 0, 4, BINS/2, 0, 1);
+    hprMXT[k]   = new TProfile(Form("prof MXT(%d)", k),    Form(";M(%s) (GeV); <x_{T}(%s)>", slabels.at(k).Data(), alabels.at(k).Data()), BINS, MIN_M, MAX_M);
 
     // Save errors
     hprMPt[k]->Sumw2();
@@ -506,17 +608,17 @@ void InitHistogram() {
     hprMXT[k]->Sumw2();
 
 
-    h2TPC_Pi[k] = new TH2F("(p,TPC_Pi)", ";p (GeV); #sigma #pi TPC", 200, 0, 3, 200, -50, 50);
-    h2TPC_Ka[k] = new TH2F("(p,TPC_Ka)", ";p (GeV); #sigma K TPC",   200, 0, 3, 200, -50, 50);
-    h2TPC_Pr[k] = new TH2F("(p,TPC_Pr)", ";p (GeV); #sigma p TPC",   200, 0, 3, 200, -50, 50);
+    h2TPC_Pi[k] = new TH2F(Form("(p,TPC_Pi(%d))", k), ";p (GeV); #sigma #pi TPC", 200, 0, 3, 200, -50, 50);
+    h2TPC_Ka[k] = new TH2F(Form("(p,TPC_Ka(%d))", k), ";p (GeV); #sigma K TPC",   200, 0, 3, 200, -50, 50);
+    h2TPC_Pr[k] = new TH2F(Form("(p,TPC_Pr(%d))", k), ";p (GeV); #sigma p TPC",   200, 0, 3, 200, -50, 50);
 
-    h2TOF_Pi[k] = new TH2F("(p,TPC_Pi)", ";p (GeV); #sigma #pi TOF", 200, 0, 3, 200, -50, 50);
-    h2TOF_Ka[k] = new TH2F("(p,TPC_Ka)", ";p (GeV); #sigma K TOF",   200, 0, 3, 200, -50, 50);
-    h2TOF_Pr[k] = new TH2F("(p,TPC_Pr)", ";p (GeV); #sigma p TOF",   200, 0, 3, 200, -50, 50);
+    h2TOF_Pi[k] = new TH2F(Form("(p,TOF_Pi(%d))", k), ";p (GeV); #sigma #pi TOF", 200, 0, 3, 200, -50, 50);
+    h2TOF_Ka[k] = new TH2F(Form("(p,TOF_Ka(%d))", k), ";p (GeV); #sigma K TOF",   200, 0, 3, 200, -50, 50);
+    h2TOF_Pr[k] = new TH2F(Form("(p,TOF_Pr(%d))", k), ";p (GeV); #sigma p TOF",   200, 0, 3, 200, -50, 50);
 
     // Legendre polynomials, DO NOT CHANGE THE Y-RANGE [-1,1]
     for (int i = 0; i < 8; ++i) {
-      hPl[k][i] = new TProfile(Form("hPl%d", i+1),"", 100, 0.0, MAX_M, -1, 1);
+      hPl[k][i] = new TProfile(Form("hPl%d(%d)", k, i+1),"", 100, 0.0, MAX_M, -1, 1);
 
       hPl[k][i]->SetXTitle(Form("M(%s) (GeV)", slabels.at(k).Data())); 
       hPl[k][i]->SetYTitle(Form("#LTP_{l}(cos(#theta)#GT |_{ r.f.}"));
@@ -572,7 +674,7 @@ void FillHisto(std::vector<double> prob_) {
         if (k == 0) { // Write down ascii output for channel[0]
           fprintf(asciif, "%0.6f,%0.6f,%0.6f,%0.6f \n", system_r.M(), system_r.Px(), system_r.Py(), system_r.Pz());
         }
-        
+
         // Observables
         double M   = system_r.M();
         double Pt  = system_r.Perp();
@@ -582,8 +684,18 @@ void FillHisto(std::vector<double> prob_) {
         double eta = p_r.at(0).Eta();
         double phi = p_r.at(0).Phi();
 
+        // Fractional longitudinal momentum (pz) loss in the collinear limit
+        double xi1 = M / sqrts * std::exp(Y);
+        double xi2 = M / sqrts * std::exp(-Y);
+
         // Fill histograms >>
+        h1xi1[k]->Fill(xi1, weight_.at(k));
+        h1xi2[k]->Fill(xi2, weight_.at(k));
+        h2xi1xi2[k]->Fill(xi1, xi2, weight_.at(k));
+
         h1M[k]->Fill(M, weight_.at(k));
+        h1MJPsi[k]->Fill(M, weight_.at(k));
+
         h1Pt[k]->Fill(Pt, weight_.at(k));
         h1pt[k]->Fill(pt, weight_.at(k));
 
@@ -592,13 +704,15 @@ void FillHisto(std::vector<double> prob_) {
         h1eta[k]->Fill(eta, weight_.at(k));
         h1dy[k]->Fill(p_r.at(0).Rapidity() - p_r.at(1).Rapidity(), weight_.at(k));
 
+        h2y1y2[k]->Fill(p_r.at(0).Rapidity(), p_r.at(1).Rapidity(), weight_.at(k));
+
         hprMPt[k]->Fill(M, Pt, weight_.at(k));
         hprMpt[k]->Fill(M, pt, weight_.at(k));
 
         h2EtaPhi[k]->Fill(eta, phi, weight_.at(k));
 
 
-        // Calculate Feynman x = 2 |p_z*| / sqrt(shat)
+        // Calculate Feynman x_F = 2 |p_z*| / sqrt(shat)
         // Boost particles to the central system rest frame
         TVector3 betavec = -system_r.BoostVector(); // Note the minus sign
         TLorentzVector pboosted = p_r.at(0);
@@ -620,19 +734,19 @@ void FillHisto(std::vector<double> prob_) {
 
         h2Mpt[k]->Fill(M, p_r.at(0).Perp(), weight_.at(k));
         h2Mpt[k]->Fill(M, p_r.at(1).Perp(), weight_.at(k));
-        
+
         h2Ptdphi[k]->Fill(Pt, p_r.at(0).DeltaPhi(p_r.at(1)), weight_.at(k));
         h2ptdphi[k]->Fill(pt, p_r.at(0).DeltaPhi(p_r.at(1)), weight_.at(k));
 
         // Calculate cos(theta) in the non-rotated rest frame
         double costheta = pboosted.CosTheta();
 
+        // Calculate cos(theta) in the rotated helicity frame
         std::vector<TLorentzVector> fs;
         fs.push_back(p_r.at(0)); fs.push_back(p_r.at(1));
-
         HEframe(fs);
+        double HEcostheta = fs.at(0).CosTheta(); // Take the first daughter
 
-        double HEcostheta = fs.at(0).CosTheta();
 
         // Legendre polynomials P_l cos(theta), l = 1,2,3,4,5,6,7,8
         for (int l = 0; l < 8; ++l) { // note l+1
@@ -683,7 +797,7 @@ void HEframe(std::vector<TLorentzVector>& p) {
         printf("- Pions in ROTATED LAB FRAME: \n");
         p.at(0).Print();
         p.at(1).Print();
-        
+
         TVector3 ex(1,0,0);
         TVector3 ey(0,1,0);
         TVector3 ez(0,0,1);
@@ -749,6 +863,26 @@ void HEframe(std::vector<TLorentzVector>& p) {
     }
 }
 
+// Quadratic polynomial background function
+Double_t background(Double_t *x, Double_t *par) {
+   return par[2]*x[0]*x[0] + par[1]*x[0] + par[0];
+}
+
+Double_t exponential(Double_t *x, Double_t *par) {
+  return par[0] * std::exp(par[1]*x[0] + par[2]);
+}
+
+// Breit-wigner function
+Double_t lorentzianPeak(Double_t *x, Double_t *par) {
+  return (0.5*par[0]*par[1]/TMath::Pi()) /
+    TMath::Max(1.e-10, (x[0]-par[2])*(x[0]-par[2]) + 0.25*par[1]*par[1]);
+}
+
+// Sum of background and peak function
+Double_t fitFunction(Double_t *x, Double_t *par) {
+  return background(x,par) + lorentzianPeak(x,&par[3]);
+}
+
 // Create plots
 void MakePlots() {
 
@@ -760,80 +894,152 @@ void MakePlots() {
   for (int k = 0; k < NCHANNEL; ++k) {
 
     // Create output directory in a case
-    TString output_dir = "./figs/" + slabels.at(k);
-    gSystem->Exec(Form("mkdir %s", output_dir.Data()));
+    gSystem->Exec(Form("mkdir ./figs/%s/", output_ascii.c_str() ));
+
+    std::string output_dir = "./figs/" + output_ascii + "/" + slabels.at(k).Data();
+    gSystem->Exec(Form("mkdir %s", output_dir.c_str()));
 
     TCanvas c10("c10", "c10", 400, 300);
     TCanvas c10_log("c10_log", "c10_log", 400, 300);
     c10_log.SetLogy();
 
     c10.cd();
-    h1M[k]->Draw();    
-    c10.SaveAs(Form("./figs/%s/h1M_%d.pdf", slabels.at(k).Data(), k));
+    h1xi1[k]->Draw();
+    c10.SaveAs(Form("./figs/%s/%s/h1xi1_%d.pdf", output_ascii.c_str(), slabels.at(k).Data(), k));
+    c10_log.cd();
+    h1xi1[k]->Draw(); h1xi1[k]->SetMinimum(0.1);  //   Y-axis minimum (for log only)
+    c10_log.SaveAs(Form("./figs/%s/%s/h1xi1_logy_%d.pdf", output_ascii.c_str(), slabels.at(k).Data(), k));
+
+    c10.cd();
+    h1xi2[k]->Draw();
+    c10.SaveAs(Form("./figs/%s/%s/h1xi2_%d.pdf", output_ascii.c_str(), slabels.at(k).Data(), k));
+    c10_log.cd();
+    h1xi2[k]->Draw(); h1xi2[k]->SetMinimum(0.1);  //   Y-axis minimum (for log only)
+    c10_log.SaveAs(Form("./figs/%s/%s/h1xi2_logy_%d.pdf", output_ascii.c_str(), slabels.at(k).Data(), k));
+
+
+    c10.cd();
+    h1M[k]->Draw();
+    c10.SaveAs(Form("./figs/%s/%s/h1M_%d.pdf", output_ascii.c_str(), slabels.at(k).Data(), k));
     c10_log.cd(); 
     h1M[k]->Draw(); h1M[k]->SetMinimum(0.1);  //   Y-axis minimum (for log only)
-    c10_log.SaveAs(Form("./figs/%s/h1M_logy_%d.pdf", slabels.at(k).Data(), k));
+    c10_log.SaveAs(Form("./figs/%s/%s/h1M_logy_%d.pdf", output_ascii.c_str(), slabels.at(k).Data(), k));
+
+
+    // ----------------------------------------------------------------------------
+    // J/psi
+
+    /*
+    c10.cd();
+
+    // create a TF1 with the range from 0 to 4 and 6 parameters
+    TF1 *fitFcn = new TF1("fitFcn",fitFunction,0,4,6);
+    fitFcn->SetNpx(500);
+    fitFcn->SetLineWidth(4);
+    fitFcn->SetLineColor(kRed);
+
+    // Set parameters
+    fitFcn->SetParameters(256, -1.16, 4,   10, 0.1, 3.1);
+
+    fitFcn->FixParameter(1, -3.8);
+    fitFcn->FixParameter(2, 12);
+
+    fitFcn->FixParameter(4, 0.1);
+    fitFcn->FixParameter(5, 3.1);
+
+    h1MJPsi[k]->Fit("fitFcn","V+","ep");
+
+    // Improve the picture:
+    TF1 *backFcn = new TF1("backFcn",background,0,4, 3);
+    backFcn->SetLineColor(kRed);
+    TF1 *signalFcn = new TF1("signalFcn",lorentzianPeak,0,4, 3);
+    signalFcn->SetLineColor(kBlue);
+    signalFcn->SetNpx(500);
+
+    // Writes the fit results into the par array
+    Double_t par[6];
+
+    fitFcn->GetParameters(par);
+    backFcn->SetParameters(par);
+    backFcn->Draw("same");
+    signalFcn->SetParameters(&par[3]);
+    signalFcn->Draw("same");
+
+    h1MJPsi[k]->Draw("E");
+
+    c10.SaveAs(Form("./figs/%s/h1MJPsi_%d.pdf", slabels.at(k).Data(), k));
+    c10_log.cd();
+    h1MJPsi[k]->Draw(); h1MJPsi[k]->SetMinimum(0.1);  //   Y-axis minimum (for log only)
+    c10_log.SaveAs(Form("./figs/%s/h1MJPsi_logy_%d.pdf", slabels.at(k).Data(), k));
+
+    */
+// ----------------------------------------------------------------------------
 
     c10.cd();
     h1Pt[k]->Draw();
-    c10.SaveAs(Form("./figs/%s/h1Pt_%d.pdf", slabels.at(k).Data(), k));
+    c10.SaveAs(Form("./figs/%s/%s/h1Pt_%d.pdf", output_ascii.c_str(), slabels.at(k).Data(), k));
     c10_log.cd();
     h1Pt[k]->Draw();  h1Pt[k]->SetMinimum(0.1);  //   Y-axis minimum (for log only)
-    c10_log.SaveAs(Form("./figs/%s/h1Pt_logy_%d.pdf", slabels.at(k).Data(), k));
+    c10_log.SaveAs(Form("./figs/%s/%s/h1Pt_logy_%d.pdf", output_ascii.c_str(), slabels.at(k).Data(), k));
 
     c10.cd();
     h1pt[k]->Draw();
-    c10.SaveAs(Form("./figs/%s/h1pt_%d.pdf", slabels.at(k).Data(), k));
+    c10.SaveAs(Form("./figs/%s/%s/h1pt_%d.pdf", output_ascii.c_str(), slabels.at(k).Data(), k));
     c10_log.cd();
     h1pt[k]->Draw(); h1pt[k]->SetMinimum(0.1);  //   Y-axis minimum (for log only)
-    c10_log.SaveAs(Form("./figs/%s/h1pt_logy_%d.pdf", slabels.at(k).Data(), k));
+    c10_log.SaveAs(Form("./figs/%s/%s/h1pt_logy_%d.pdf", output_ascii.c_str(), slabels.at(k).Data(), k));
 
     c10.cd();
-    h1Y[k]->Draw();    c10.SaveAs(Form("./figs/%s/h1Y_%d.pdf", slabels.at(k).Data(), k));
-    h1y[k]->Draw();    c10.SaveAs(Form("./figs/%s/h1y_%d.pdf", slabels.at(k).Data(), k));
-    h1eta[k]->Draw();  c10.SaveAs(Form("./figs/%s/h1eta_%d.pdf", slabels.at(k).Data(), k));
-    h1dy[k]->Draw();   c10.SaveAs(Form("./figs/%s/h1dy_%d.pdf", slabels.at(k).Data(), k));
+    h1Y[k]->Draw();    c10.SaveAs(Form("./figs/%s/%s/h1Y_%d.pdf",   output_ascii.c_str(), slabels.at(k).Data(), k));
+    h1y[k]->Draw();    c10.SaveAs(Form("./figs/%s/%s/h1y_%d.pdf",   output_ascii.c_str(), slabels.at(k).Data(), k));
+    h1eta[k]->Draw();  c10.SaveAs(Form("./figs/%s/%s/h1eta_%d.pdf", output_ascii.c_str(), slabels.at(k).Data(), k));
+    h1dy[k]->Draw();   c10.SaveAs(Form("./figs/%s/%s/h1dy_%d.pdf",  output_ascii.c_str(), slabels.at(k).Data(), k));
 
-    hprMPt[k]->Draw(); c10.SaveAs(Form("./figs/%s/hprMPt_%d.pdf", slabels.at(k).Data(), k));
-    hprMpt[k]->Draw(); c10.SaveAs(Form("./figs/%s/hprMpt_%d.pdf", slabels.at(k).Data(), k));
-
-
-    TCanvas c100("c100", "c100", 400, 300);
-    c100.cd();
-    h2EtaPhi[k]->Draw("COLZ");    c100.SaveAs(Form("./figs/%s/h2EtaPhi_%d.pdf", slabels.at(k).Data(), k));
-    c100.cd();
-    h2MCosTheta[k]->Draw("COLZ"); c100.SaveAs(Form("./figs/%s/h2MCosTheta_%d.pdf", slabels.at(k).Data(), k));
+    hprMPt[k]->Draw(); c10.SaveAs(Form("./figs/%s/%s/hprMPt_%d.pdf", output_ascii.c_str(), slabels.at(k).Data(), k));
+    hprMpt[k]->Draw(); c10.SaveAs(Form("./figs/%s/%s/hprMpt_%d.pdf", output_ascii.c_str(), slabels.at(k).Data(), k));
 
 
+    TCanvas c100("c100", "c100", 400, 400);
     c100.cd();
-    h2MPt[k]->Draw("COLZ");    c100.SaveAs(Form("./figs/%s/h2MPt_%d.pdf", slabels.at(k).Data(), k));
+    h2xi1xi2[k]->Draw("COLZ");    c100.SaveAs(Form("./figs/%s/%s/h2xi1xi2_%d.pdf", output_ascii.c_str(), slabels.at(k).Data(), k));
     c100.cd();
-    h2Mdphi[k]->Draw("COLZ");  c100.SaveAs(Form("./figs/%s/h2Mdphi_%d.pdf", slabels.at(k).Data(), k));
+    h2y1y2[k]->Draw("COLZ");      c100.SaveAs(Form("./figs/%s/%s/h2y1y2_%d.pdf",   output_ascii.c_str(), slabels.at(k).Data(), k));
     c100.cd();
-    h2Mpt[k]->Draw("COLZ");    c100.SaveAs(Form("./figs/%s/h2Mpt_%d.pdf", slabels.at(k).Data(), k));
+    h2EtaPhi[k]->Draw("COLZ");    c100.SaveAs(Form("./figs/%s/%s/h2EtaPhi_%d.pdf", output_ascii.c_str(), slabels.at(k).Data(), k));
     c100.cd();
-    h2Ptdphi[k]->Draw("COLZ"); c100.SaveAs(Form("./figs/%s/h2Ptdphi_%d.pdf", slabels.at(k).Data(), k));
+    h2MCosTheta[k]->Draw("COLZ"); c100.SaveAs(Form("./figs/%s/%s/h2MCosTheta_%d.pdf", output_ascii.c_str(), slabels.at(k).Data(), k));
+
+
     c100.cd();
-    h2ptdphi[k]->Draw("COLZ"); c100.SaveAs(Form("./figs/%s/h2ptdphi_%d.pdf", slabels.at(k).Data(), k));
+    h2MPt[k]->Draw("COLZ");    c100.SaveAs(Form("./figs/%s/%s/h2MPt_%d.pdf",    output_ascii.c_str(), slabels.at(k).Data(), k));
+    c100.cd();
+    h2Mdphi[k]->Draw("COLZ");  c100.SaveAs(Form("./figs/%s/%s/h2Mdphi_%d.pdf",  output_ascii.c_str(), slabels.at(k).Data(), k));
+    c100.cd();
+    h2Mpt[k]->Draw("COLZ");    c100.SaveAs(Form("./figs/%s/%s/h2Mpt_%d.pdf",    output_ascii.c_str(), slabels.at(k).Data(), k));
+    c100.cd();
+    h2Ptdphi[k]->Draw("COLZ"); c100.SaveAs(Form("./figs/%s/%s/h2Ptdphi_%d.pdf", output_ascii.c_str(), slabels.at(k).Data(), k));
+    c100.cd();
+    h2ptdphi[k]->Draw("COLZ"); c100.SaveAs(Form("./figs/%s/%s/h2ptdphi_%d.pdf", output_ascii.c_str(), slabels.at(k).Data(), k));
+
 
     // -------------------------------------------------------------------------------------
     TCanvas cX("cX", "cX", 400, 300);
     cX.cd();
-    h1XF[k]->Draw();           cX.SaveAs(Form("./figs/%s/h1XF_%d.pdf", slabels.at(k).Data(), k));
+    h1XF[k]->Draw();           cX.SaveAs(Form("./figs/%s/%s/h1XF_%d.pdf", output_ascii.c_str(), slabels.at(k).Data(), k));
     TCanvas cX2("cX2", "cX2", 400, 300);
     cX2.cd();
-    h2MXF[k]->Draw("COLZ");    cX2.SaveAs(Form("./figs/%s/h2MXF_%d.pdf", slabels.at(k).Data(), k));
+    h2MXF[k]->Draw("COLZ");    cX2.SaveAs(Form("./figs/%s/%s/h2MXF_%d.pdf", output_ascii.c_str(), slabels.at(k).Data(), k));
     TCanvas cX3("cX3", "cX3", 400, 300);
     cX3.cd();
-    hprMXF[k]->Draw();         cX3.SaveAs(Form("./figs/%s/hprMXF_%d.pdf", slabels.at(k).Data(), k));
+    hprMXF[k]->Draw();         cX3.SaveAs(Form("./figs/%s/%s/hprMXF_%d.pdf", output_ascii.c_str(), slabels.at(k).Data(), k));
 
 
     cX.cd();
-    h1XT[k]->Draw();           cX.SaveAs(Form("./figs/%s/h1XT_%d.pdf", slabels.at(k).Data(), k));
+    h1XT[k]->Draw();           cX.SaveAs(Form("./figs/%s/%s/h1XT_%d.pdf", output_ascii.c_str(), slabels.at(k).Data(), k));
     cX2.cd();
-    h2MXT[k]->Draw("COLZ");    cX2.SaveAs(Form("./figs/%s/h2MXT_%d.pdf", slabels.at(k).Data(), k));
+    h2MXT[k]->Draw("COLZ");    cX2.SaveAs(Form("./figs/%s/%s/h2MXT_%d.pdf", output_ascii.c_str(), slabels.at(k).Data(), k));
     cX3.cd();
-    hprMXT[k]->Draw();         cX3.SaveAs(Form("./figs/%s/hprMXT_%d.pdf", slabels.at(k).Data(), k));
+    hprMXT[k]->Draw();         cX3.SaveAs(Form("./figs/%s/%s/hprMXT_%d.pdf", output_ascii.c_str(), slabels.at(k).Data(), k));
 
 
     // -------------------------------------------------------------------------------------
@@ -847,7 +1053,7 @@ void MakePlots() {
       TLegend* leg[4];
       c115->Divide(2,2, 0.001, 0.001);
 
-      for (Int_t l = 0; l < 4; ++l) { 
+      for (Int_t l = 0; l < 4; ++l) {
         c115->cd(l+1); // note (l+1)
 
         leg[l] = new TLegend(0.15,0.75,0.4,0.85); // x1,y1,x2,y2
@@ -861,7 +1067,7 @@ void MakePlots() {
         leg[l]->AddEntry(hPl[k][l], Form("l = %d", l+1), "l");
         leg[l]->Draw();
       }
-      c115->SaveAs(Form("./figs/%s/hPl_1to4_%d.pdf", slabels.at(k).Data(), k));
+      c115->SaveAs(Form("./figs/%s/%s/hPl_1to4_%d.pdf", output_ascii.c_str(), slabels.at(k).Data(), k));
     }
 
     // 5...8
@@ -871,7 +1077,7 @@ void MakePlots() {
       c115->Divide(2,2, 0.001, 0.001);
 
       const Int_t colors[4] = {48, 53, 98, 32};
-      for (Int_t l = 4; l < 8; ++l) { 
+      for (Int_t l = 4; l < 8; ++l) {
         c115->cd(l-3); // note (l-3)
 
         leg[l] = new TLegend(0.15,0.75,0.4,0.85); // x1,y1,x2,y2
@@ -885,7 +1091,7 @@ void MakePlots() {
         leg[l]->AddEntry(hPl[k][l], Form("l = %d", l+1), "l");
         leg[l]->Draw();
       }
-      c115->SaveAs(Form("./figs/%s/hPl_5to8_%d.pdf", slabels.at(k).Data(), k));
+      c115->SaveAs(Form("./figs/%s/%s/hPl_5to8_%d.pdf", output_ascii.c_str(), slabels.at(k).Data(), k));
     }
 
   }
@@ -899,15 +1105,16 @@ void Analyzer(std::vector<std::vector<double>>& channel_prior, int mode) {
 
   std::vector<std::vector<double>> channelweight(SPBINS, std::vector<double> (NCHANNEL, 1.0/(double)(NCHANNEL)));
 
-  // Initialize data source
-  InitTree();
-
   std::vector<double> posterior_sum(NCHANNEL, 0.0);
+
+  // Init data
+  InitTree(ROOT_datafile);
+
 
   // Loop over events
   int N_selected = 0;
   for (Int_t ev = 0; ev < tree2track->GetEntries(); ++ev) {
-    
+
     tree2track->GetEntry(ev);
 
     // Get detector signal
@@ -916,6 +1123,11 @@ void Analyzer(std::vector<std::vector<double>>& channel_prior, int mode) {
     // Check PID signal sanity
     if (!CheckPIDsignal())
       continue;
+
+    // Check VETO
+    if (!CheckForwardVeto())
+      continue;
+
     ++N_selected;
 
     // Get momentum of tracks
@@ -995,12 +1207,12 @@ void Analyzer(std::vector<std::vector<double>>& channel_prior, int mode) {
     // Ratios
     for (int j = 0; j < NCHANNEL; ++j) {
         channelweight[i][j] /= sum;
-        printf("%0.3f ", channelweight[i][j]);   
+        printf("%0.3f ", channelweight[i][j]);
     }
     printf(" +- ");
     // Uncertainty
     for (int j = 0; j < NCHANNEL; ++j) {
-        printf("%0.1E ", z95 * std::sqrt( 1 / sum * channelweight[i][j] * (1.0 - channelweight[i][j]) ));   
+        printf("%0.1E ", z95 * std::sqrt( 1 / sum * channelweight[i][j] * (1.0 - channelweight[i][j]) ));
     }
     printf("\n");
   }
@@ -1032,7 +1244,7 @@ std::vector<std::vector<double>> EM(double PMIN, double PMAX, int PBINS, int ITE
   printf("EM Phase I: \n");
 
   // Init data
-  InitTree();
+  InitTree(ROOT_datafile);
 
   std::vector<double> posterior_sum;
   for (int i = 0; i < NSPECIES; ++i) {
@@ -1061,6 +1273,10 @@ std::vector<std::vector<double>> EM(double PMIN, double PMAX, int PBINS, int ITE
       if (!CheckPIDsignal())
         continue;
 
+      // Check VETO
+      if (!CheckForwardVeto())
+        continue;
+
       // Get momentum of tracks
       p_r.at(0).SetXYZM(px1,py1,pz1,0);
       p_r.at(1).SetXYZM(px2,py2,pz2,0);
@@ -1085,13 +1301,13 @@ std::vector<std::vector<double>> EM(double PMIN, double PMAX, int PBINS, int ITE
         }
       }
 
-      // LAST ITERATION: Save posteriori probabilities for particle ratios 
+      // LAST ITERATION: Save posteriori probabilities for particle ratios
       if (it == ITER - 1) {
         for (int i = 0; i < NSPECIES; ++i) {
 
           // Loop over final states
           for (int f = 0; f < NFINALSTATES; ++f) {
-            posterior_sum.at(i) += posterior.at(f).at(i);  
+            posterior_sum.at(i) += posterior.at(f).at(i);
           }
         }
       }
@@ -1110,12 +1326,12 @@ std::vector<std::vector<double>> EM(double PMIN, double PMAX, int PBINS, int ITE
       // Ratios
       for (int j = 0; j < NSPECIES; ++j) {
           particleweight[i][j] /= sum;
-          printf("%0.3f ", particleweight[i][j]);   
+          printf("%0.3f ", particleweight[i][j]);
       }
       printf(" +- ");
       // Uncertainty
       for (int j = 0; j < NSPECIES; ++j) {
-          printf("%0.1E ", z95 * std::sqrt( 1 / sum * particleweight[i][j] * (1.0 - particleweight[i][j]) ));   
+          printf("%0.1E ", z95 * std::sqrt( 1 / sum * particleweight[i][j] * (1.0 - particleweight[i][j]) ));
       }
       printf("\n");
     }
@@ -1162,7 +1378,7 @@ int GetIdx(double value, double MINVAL, double MAXVAL, int NUMBINS) {
 
 
 // Get posteriori probabilities
-void GetProb(std::vector<double>& posterior, 
+void GetProb(std::vector<double>& posterior,
   const std::vector<std::vector<double>>& nsigma, const std::vector<double>& prior) {
 
   const double BOUND = 50; // No signal bound +-
@@ -1173,14 +1389,14 @@ void GetProb(std::vector<double>& posterior,
   for (uint i = 0; i < prior.size(); ++i) {
 
     // Loop over detectors (TPC,TOF)
-    //bool check = false; 
+    //bool check = false;
     for (uint det = 0; det < nsigma.at(i).size(); ++det) {
 
       // Missing values (such as missing TOF are omitted from the product likelihood)
       if (-BOUND < nsigma.at(i).at(det) && nsigma.at(i).at(det) < BOUND) {
 
         // Independent detectors -> product likelihood (correlation information neglected)
-        fval.at(i) *= fG(nsigma.at(i).at(det)); 
+        fval.at(i) *= fG(nsigma.at(i).at(det));
       }
     }
   }
@@ -1207,7 +1423,7 @@ void GetProb(std::vector<double>& posterior,
 // -> can be compared.
 double fG(double n) {
 
-  const double sigma = 1.0; 
+  const double sigma = 1.0;
   return 1.0/(std::sqrt(2.0*PI)*sigma) * std::exp(-0.5*n*n);
 
 }
