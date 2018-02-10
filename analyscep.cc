@@ -1364,7 +1364,7 @@ std::vector<std::vector<double>> EM(double PMIN, double PMAX, int PBINS, int ITE
 // Gives exact uniform filling within bin boundaries.
 int GetIdx(double value, double MINVAL, double MAXVAL, int NUMBINS) {
 
-  const double BINWIDTH = (MAXVAL - MINVAL) / NUMBINS;
+  const double BINWIDTH = (MAXVAL - MINVAL) / (double)NUMBINS;
   int idx = std::floor((value - MINVAL) / BINWIDTH);
 
   if (idx < 0) {           // Underflow
