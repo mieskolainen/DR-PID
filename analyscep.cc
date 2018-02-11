@@ -228,9 +228,13 @@ std::vector<TLorentzVector> p_r; // reconstructed
 TLorentzVector system_g;
 TLorentzVector system_r;
 
-// SANITY CUTS
+// SANITY CUTS to skip event completely
 const double TPCCUT = 6.0; // sigmas
 const double TOFCUT = 1e6;
+
+// SANITY CUTS to skip detector in the product likelihood
+const double BOUND = 50;   // No signal bound +- sigmas
+
 
 // Constants
 const double z95 = 1.96; // 95% Gaussian CL
@@ -1380,8 +1384,6 @@ int GetIdx(double value, double MINVAL, double MAXVAL, int NUMBINS) {
 // Get posteriori probabilities
 void GetProb(std::vector<double>& posterior,
   const std::vector<std::vector<double>>& nsigma, const std::vector<double>& prior) {
-
-  const double BOUND = 50; // No signal bound +-
 
   std::vector<double> fval(prior.size(), 1.0); // init with 1.0
 
